@@ -1,0 +1,75 @@
+package com.ps.stashit.core
+
+import android.content.Context
+import android.util.Log
+import androidx.hilt.work.HiltWorker
+import androidx.work.CoroutineWorker
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import com.ps.stashit.core.metadata.MetaDataFetcherRouter
+import com.ps.stashit.core.metadata.MetadataFetcher
+import com.ps.stashit.core.ml.TextEmbedder
+import com.ps.stashit.data.domain.SavedItem
+import com.ps.stashit.data.repository.SavedItemRepository
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.sqrt
+
+@HiltWorker
+class EmbeddingWorker @AssistedInject constructor(
+    @Assisted context: Context,
+    @Assisted params: WorkerParameters,
+    private val repository: SavedItemRepository,
+    private val textEmbedder: TextEmbedder,
+    private val metadataRouter: MetaDataFetcherRouter
+) : CoroutineWorker(context, params) {
+    companion object {
+        const val BATCH_SIZE = 20
+        const val KEY_PROCESSED_COUNT = "processed_count"
+        const val UNIQUE_PERIODIC_NAME = "embedding_sweep"
+        const val UNIQUE_IMMEDIATE_NAME = "embedding_immediate"
+    }
+
+    override suspend fun doWork(): Result {
+        return withContext(Dispatchers.Default) {
+            try {
+                var processed = 0
+                while (true) {
+                    val pending = repository.getPendingEmbedding(BATCH_SIZE)
+                    if (pending.isEmpty()) break
+
+                    for (item in pending) {
+                        val metaData = metadataRouter.fetch(item)
+                        repository.attachMetaData(item.id,metaData)
+                        val enrichedItem = item.copy(
+                            extractedTitle = metaData?.title?: item.extractedTitle,
+                            caption = item.caption
+                        )
+
+                        val text = buildEmbeddingText(enrichedItem)
+                        if (text.isBlank()) continue
+                        val embedding = textEmbedder.embedDocument(text)
+                        if(embedding.any { it.isNaN() }) {
+                            Log.w("TAG", "NaN embedding null")
+                            continue
+                        }
+                        val norm = sqrt(embedding.sumOf { (it * it).toDouble() })
+                        repository.attachEmbedding(item.id, embedding, tags = emptyList())
+                        processed++
+                    }
+                }
+                Result.Success(workDataOf(KEY_PROCESSED_COUNT to processed))
+            } catch (e: Exception) {
+                Log.e("TAG", "Exception $e")
+                Result.retry()
+            }
+        }
+    }
+
+    private fun buildEmbeddingText(item: SavedItem): String {
+        return listOfNotNull(item.extractedTitle, item.caption).joinToString(" ").trim()
+    }
+
+}
