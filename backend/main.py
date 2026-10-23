@@ -101,29 +101,52 @@ class CaptionResponse(BaseModel):
 # URL / platform detection
 # --------------------------------------------------------------------------
 
+# Every pattern is anchored to "https://<host>/" so the host is pinned: a
+# supported URL embedded in another host's path, query or fragment, or a
+# lookalike host (tiktok.com.evil.com, tiktok.com@evil.com), never matches.
+# Run URLs through normalize_url() first so scheme-less and http:// input
+# is upgraded to https:// before matching.
 YOUTUBE_SHORTS_RE = re.compile(
-    r"(?:^|//)(?:www\.|m\.)?youtube\.com/shorts/([A-Za-z0-9_-]{11})"
+    r"^https://(?:www\.|m\.)?youtube\.com/shorts/([A-Za-z0-9_-]{11})"
 )
 
 # Canonical TikTok video URLs: tiktok.com/@user/video/1234567890123
 TIKTOK_CANONICAL_RE = re.compile(
-    r"(?:^|//)(?:www\.|m\.)?tiktok\.com/@[^/]+/video/(\d+)"
+    r"^https://(?:www\.|m\.)?tiktok\.com/@[^/]+/video/(\d+)"
 )
 
 # Short links that redirect to the canonical URL: vm.tiktok.com/XXXX,
 # vt.tiktok.com/XXXX. These don't carry the numeric ID in the URL itself,
 # so we can't fully validate/extract without resolving them via yt-dlp.
 TIKTOK_SHORT_LINK_RE = re.compile(
-    r"(?:^|//)(?:vm|vt)\.tiktok\.com/"
+    r"^https://(?:vm|vt)\.tiktok\.com/"
 )
+
+# yt-dlp extractors each platform may use (full-matched against yt-dlp's
+# lowercase extractor names). This keeps yt-dlp's generic extractor, which
+# fetches any host, from ever running. TikTok short links need both: the
+# vm.tiktok extractor resolves the redirect and hands off to tiktok.
+YOUTUBE_EXTRACTORS = ["youtube"]
+TIKTOK_EXTRACTORS = ["tiktok", r"vm\.tiktok"]
+
+
+def normalize_url(url: str) -> str:
+    """Strip whitespace and force https: add it when no scheme is given,
+    upgrade http://. Any other scheme is left alone and fails matching."""
+    url = url.strip()
+    if url.lower().startswith("http://"):
+        return "https://" + url[len("http://"):]
+    if "://" not in url:
+        return "https://" + url
+    return url
 
 
 def detect_platform(url: str) -> str:
     """Return 'youtube' or 'tiktok' based on URL shape, or reject."""
-    url = url.strip()
-    if YOUTUBE_SHORTS_RE.search(url):
+    url = normalize_url(url)
+    if YOUTUBE_SHORTS_RE.match(url):
         return "youtube"
-    if TIKTOK_CANONICAL_RE.search(url) or TIKTOK_SHORT_LINK_RE.search(url):
+    if TIKTOK_CANONICAL_RE.match(url) or TIKTOK_SHORT_LINK_RE.match(url):
         return "tiktok"
     raise HTTPException(
         status_code=422,
@@ -137,7 +160,7 @@ def detect_platform(url: str) -> str:
 
 
 def extract_youtube_video_id(url: str) -> str:
-    match = YOUTUBE_SHORTS_RE.search(url.strip())
+    match = YOUTUBE_SHORTS_RE.match(normalize_url(url))
     if not match:
         raise HTTPException(status_code=422, detail=f"Not a valid YouTube Shorts URL: {url}")
     return match.group(1)
@@ -147,15 +170,20 @@ def extract_youtube_video_id(url: str) -> str:
 # yt-dlp helpers (shared)
 # --------------------------------------------------------------------------
 
-def _yt_dlp_extract_info(url: str) -> dict:
-    """Metadata-only lookup (no download) via yt-dlp. Works for both
-    YouTube and TikTok URLs."""
+def _yt_dlp_extract_info(url: str, extractors: list[str]) -> dict:
+    """Metadata-only lookup (no download) via yt-dlp, restricted to
+    `extractors`. Works for both YouTube and TikTok URLs."""
     try:
         import yt_dlp
     except ImportError:
         raise HTTPException(status_code=500, detail="yt-dlp is not installed.")
 
-    ydl_opts = {"quiet": True, "skip_download": True, "noplaylist": True}
+    ydl_opts = {
+        "quiet": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "allowed_extractors": extractors,
+    }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(url, download=False)
@@ -163,8 +191,9 @@ def _yt_dlp_extract_info(url: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Could not look up video: {e}")
 
 
-def _download_audio(url: str, video_id: str, tmpdir: str) -> str:
-    """Download best audio for a video URL into tmpdir, return the file path."""
+def _download_audio(url: str, video_id: str, tmpdir: str, extractors: list[str]) -> str:
+    """Download best audio for a video URL into tmpdir, using only
+    `extractors`, and return the file path."""
     try:
         import yt_dlp
     except ImportError:
@@ -181,6 +210,7 @@ def _download_audio(url: str, video_id: str, tmpdir: str) -> str:
         }],
         "quiet": True,
         "noplaylist": True,
+        "allowed_extractors": extractors,
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -222,9 +252,9 @@ def _transcribe_audio_file(audio_path: str, languages: list[str]) -> tuple[list[
     return segments, " ".join(text_parts).strip(), info.language
 
 
-def transcribe_via_audio(video_url: str, video_id: str, languages: list[str]) -> tuple[list[CaptionSegment], str, Optional[str]]:
+def transcribe_via_audio(video_url: str, video_id: str, languages: list[str], extractors: list[str]) -> tuple[list[CaptionSegment], str, Optional[str]]:
     with tempfile.TemporaryDirectory() as tmpdir:
-        audio_path = _download_audio(video_url, video_id, tmpdir)
+        audio_path = _download_audio(video_url, video_id, tmpdir, extractors)
         segments, full_text, language = _transcribe_audio_file(audio_path, languages)
         return segments, full_text, language
 
@@ -234,7 +264,7 @@ def transcribe_via_audio(video_url: str, video_id: str, languages: list[str]) ->
 # --------------------------------------------------------------------------
 
 def get_youtube_duration(video_id: str) -> float:
-    info = _yt_dlp_extract_info(f"https://www.youtube.com/watch?v={video_id}")
+    info = _yt_dlp_extract_info(f"https://www.youtube.com/watch?v={video_id}", YOUTUBE_EXTRACTORS)
     duration = info.get("duration")
     if duration is None:
         raise HTTPException(status_code=502, detail="Video duration is unavailable; cannot verify length.")
@@ -352,7 +382,7 @@ def fetch_tiktok_captions(info: dict, languages: list[str]) -> Optional[tuple[li
 
 @app.post("/captions", response_model=CaptionResponse)
 def get_captions(req: CaptionRequest):
-    url = req.url.strip()
+    url = normalize_url(req.url)
     platform = detect_platform(url)
 
     if platform == "youtube":
@@ -384,7 +414,7 @@ def get_captions(req: CaptionRequest):
 
         logger.info("[youtube] Falling back to audio transcription for %s", video_id)
         segments, full_text, language = transcribe_via_audio(
-            f"https://www.youtube.com/watch?v={video_id}", video_id, req.languages
+            f"https://www.youtube.com/watch?v={video_id}", video_id, req.languages, YOUTUBE_EXTRACTORS
         )
         return CaptionResponse(
             platform="youtube",
@@ -399,7 +429,7 @@ def get_captions(req: CaptionRequest):
 
     else:  # platform == "tiktok"
         logger.info("[tiktok] Looking up metadata for %s", url)
-        info = _yt_dlp_extract_info(url)
+        info = _yt_dlp_extract_info(url, TIKTOK_EXTRACTORS)
         video_id = str(info.get("id") or "unknown")
         duration = info.get("duration")
         if duration is None:
@@ -430,7 +460,7 @@ def get_captions(req: CaptionRequest):
 
         logger.info("[tiktok] Falling back to audio transcription for %s", video_id)
         canonical_url = info.get("webpage_url") or url
-        segments, full_text, language = transcribe_via_audio(canonical_url, video_id, req.languages)
+        segments, full_text, language = transcribe_via_audio(canonical_url, video_id, req.languages, TIKTOK_EXTRACTORS)
         return CaptionResponse(
             platform="tiktok",
             video_id=video_id,
