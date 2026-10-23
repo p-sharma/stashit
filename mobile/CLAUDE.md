@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Read README.md before changing anything in `core/ml/`, embedding storage, or search. It documents the model asset setup and the EmbeddingGemma rules (prompt prefixes, Matryoshka truncation, thread safety, re-index triggers).
+
 ## Project
 
 Stash It is an Android app (single `:app` module, package `com.ps.stashit`). Users share short-video links (YouTube Shorts, TikTok, Instagram Reels) into the app, and it indexes them for on-device semantic search. The git root is one level up (`StashIt/`), with a sibling `backend/` directory; this file covers `mobile/` only.
@@ -19,14 +21,7 @@ Stack: Kotlin, Jetpack Compose (Material3), Hilt, Room, WorkManager, Retrofit/Ok
 ./gradlew lint
 ```
 
-Only template example tests exist today.
-
-### Required model asset
-
-`*.task` and `*.tflite` are gitignored. The build needs the EmbeddingGemma task file at `app/src/main/assets/models/embedding_gemma.task`, downloaded from:
-https://storage.googleapis.com/mediapipe-models/text_embedder/embedding_gemma/int4int8/latest/embedding_gemma.task
-
-`app/build.gradle.kts` sets `androidResources.noCompress` for `tflite`/`task`/`bin`. If that is lost, MediaPipe fails with `Model is not a valid Flatbuffer buffer`.
+Only template example tests exist today. `*.task` and `*.tflite` are gitignored, so the model asset from the README's Quick start must be present before building.
 
 ## Architecture
 
@@ -57,12 +52,7 @@ The `core/ml/TextEmbedder` interface has `embedDocument`, `embedQuery`, `embed`,
 - `FakeTextEmbedder`: hash-based, 384 dims.
 - `ModelAssetInstaller`: references gecko/sentencepiece assets that are not present.
 
-EmbeddingGemma rules (see README.md for the full rationale):
-- Queries and documents **must** use different prompt prefixes: `task: search result | query: {text}` versus `title: {title | "none"} | text: {text}`. If the prefixes are wrong or shared, every score bunches near 0.9. Nothing errors; retrieval just gets worse.
-- Prefixes, output dimension, normalization, and the model file together define the vector space. Changing any one of them invalidates every stored embedding and requires a full re-index.
-- The MediaPipe handle is not thread-safe. Every native `embed` call must stay inside the `Mutex`.
-
-**The current code differs from the README in a few places.** Check these before you rely on either one:
+The EmbeddingGemma rules (prompt prefixes, re-index triggers, `Mutex`) are in README.md. **The current code differs from the README in a few places.** Check these before you rely on either one:
 - `LocalRagTextEmbedder.embed` truncates 768 -> 512 with `copyOf` but does **not** renormalize, and it has no `require(raw.size >= 512)` guard. The README says both exist. Search uses full cosine, so it still ranks correctly. A dot-product shortcut would not.
 - The document prompt is `"title: | text: ..."`. It passes no title and does not use the `"none"` placeholder the README specifies.
 - The model is copied to `cacheDir`, which the README explicitly warns against because Android can evict it. The copy is also not atomic: a partial file passes the `length() != 0` check.
