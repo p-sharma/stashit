@@ -2,7 +2,7 @@
 
 The backend for the Stash It app. It's a small FastAPI service that takes a YouTube Shorts or TikTok link and returns the video's captions as full text and as timed segments. When a video has no caption track, the service downloads the audio and transcribes it with Whisper.
 
-The service only handles short-form video: Shorts and TikTok links, up to 120 seconds long. The Android app is in the sibling `mobile/` directory, and it does not call this service yet.
+The service only handles short-form video: Shorts and TikTok links, up to 120 seconds long. For what Stash It is and how this service fits into it, see the [project README](../README.md).
 
 ## Running locally
 

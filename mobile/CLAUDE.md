@@ -21,7 +21,7 @@ Stack: Kotlin, Jetpack Compose (Material3), Hilt, Room, WorkManager, Retrofit/Ok
 ./gradlew lint
 ```
 
-Only template example tests exist today. `*.task` and `*.tflite` are gitignored, so the model asset from the README's Quick start must be present before building.
+Only template example tests exist today. `*.task` and `*.tflite` are gitignored, so the model asset from the README's "Add the model asset" section must be present before building.
 
 ## Architecture
 
