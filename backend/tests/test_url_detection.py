@@ -79,22 +79,69 @@ def test_extract_youtube_video_id_rejects_non_shorts():
     assert exc.value.status_code == 422
 
 
-@pytest.mark.xfail(
-    reason="Known bug: URL patterns are unanchored, so a supported URL embedded "
-           "in another host's query/fragment is accepted (TikTok branch passes "
-           "the full URL to yt-dlp: SSRF)."
-)
 @pytest.mark.parametrize(
     "url",
     [
         "https://attacker.example/x?//vm.tiktok.com/abc",
         "https://attacker.example/#//www.tiktok.com/@u/video/123",
         "https://attacker.example/?r=//youtube.com/shorts/abcdefghijk",
+        "https://attacker.example//vm.tiktok.com/abc",
+        "http://169.254.169.254/x?//vm.tiktok.com/",
     ],
 )
 def test_detect_platform_rejects_embedded_supported_url(url):
-    with pytest.raises(HTTPException):
+    with pytest.raises(HTTPException) as exc:
         main.detect_platform(url)
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://vm.tiktok.com.attacker.example/abc",
+        "https://www.tiktok.com.attacker.example/@u/video/1",
+        "https://www.youtube.com.attacker.example/shorts/abcdefghijk",
+        "https://vm.tiktok.com@attacker.example/abc",
+        "https://www.tiktok.com@attacker.example/@u/video/1",
+        "https://vm.tiktok.com:8080/abc",
+        "https://www.youtube.com:8443/shorts/abcdefghijk",
+        "ftp://vm.tiktok.com/abc",
+        "file:///vm.tiktok.com/abc",
+        "//vm.tiktok.com/abc",
+    ],
+)
+def test_detect_platform_rejects_lookalike_hosts_ports_and_schemes(url):
+    with pytest.raises(HTTPException) as exc:
+        main.detect_platform(url)
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://vm.tiktok.com/abc", "https://vm.tiktok.com/abc"),
+        ("http://vm.tiktok.com/abc", "https://vm.tiktok.com/abc"),
+        ("HTTP://vm.tiktok.com/abc", "https://vm.tiktok.com/abc"),
+        ("vm.tiktok.com/abc", "https://vm.tiktok.com/abc"),
+        ("  tiktok.com/@u/video/1  ", "https://tiktok.com/@u/video/1"),
+        ("ftp://vm.tiktok.com/abc", "ftp://vm.tiktok.com/abc"),
+    ],
+)
+def test_normalize_url(url, expected):
+    assert main.normalize_url(url) == expected
+
+
+def test_extractor_allowlists_load_only_platform_extractors():
+    """Uses the real yt-dlp (no network) so an extractor rename upstream
+    fails here instead of turning every request into a 404."""
+    yt_dlp = pytest.importorskip("yt_dlp")
+
+    def loaded(allowed):
+        ydl = yt_dlp.YoutubeDL({"quiet": True, "allowed_extractors": allowed})
+        return set(ydl._ies)
+
+    assert loaded(main.TIKTOK_EXTRACTORS) == {"TikTok", "TikTokVM"}
+    assert loaded(main.YOUTUBE_EXTRACTORS) == {"Youtube"}
 
 
 @pytest.mark.xfail(

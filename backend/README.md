@@ -60,6 +60,8 @@ Accepted URL shapes:
 
 Any other link, including `youtube.com/watch` links, `youtu.be` links, and bare IDs, is rejected.
 
+Before matching, a URL with no scheme gets `https://` added and an `http://` URL is upgraded to `https://`. Matching is anchored to `https://<host>/`, so the host must be exactly one of the hosts above: no other scheme, no port, no `user@` part, and no supported URL hidden inside another URL. yt-dlp is also limited to the platform's own extractors (`allowed_extractors`), so its generic extractor, which fetches any host, never runs.
+
 Response:
 
 ```json
@@ -155,7 +157,6 @@ These environment variables are optional overrides:
 
 Each of these has a strict `xfail` test that will start failing once the bug is fixed.
 
-- **The TikTok URL check allows SSRF.** The URL patterns in `main.py` match anywhere in the string. A URL like `http://169.254.169.254/x?//vm.tiktok.com/` is treated as TikTok, and the whole URL is passed to yt-dlp, whose generic extractor fetches any host. The service is public and the API key isn't checked, so this matters. YouTube links are not affected, because that branch rebuilds the URL from the video ID.
 - **WebVTT timestamps without hours are read as 0.** `_vtt_timestamp_to_seconds` only handles `hh:mm:ss.mmm`. Cues written as `mm:ss.mmm`, which WebVTT allows, all get `start=0` and `duration=0`.
 - **YouTube request-blocking errors return a 500.** `fetch_youtube_captions` only catches `TranscriptsDisabled`, `NoTranscriptFound`, and `VideoUnavailable`. `RequestBlocked` and `IpBlocked`, which YouTube often raises against cloud IPs, return an unhandled 500.
 - **Long Shorts IDs are cut short.** The Shorts ID pattern has no end boundary, so a 12-character ID is accepted and cut to 11 characters.

@@ -150,7 +150,9 @@ def test_youtube_no_captions_falls_back_to_audio(client, fake_yt_dlp, youtube_ca
     assert body["source"] == "whisper_transcription"
     assert body["is_auto_generated"] is None
     assert body["full_text"] == "spoken"
-    assert audio.calls == [("https://www.youtube.com/watch?v=abcdefghijk", "abcdefghijk", ["en"])]
+    assert audio.calls == [
+        ("https://www.youtube.com/watch?v=abcdefghijk", "abcdefghijk", ["en"], main.YOUTUBE_EXTRACTORS)
+    ]
 
 
 def test_youtube_audio_fallback_end_to_end(client, fake_yt_dlp, fake_whisper, youtube_captions):
@@ -163,6 +165,7 @@ def test_youtube_audio_fallback_end_to_end(client, fake_yt_dlp, fake_whisper, yo
     assert resp.status_code == 200
     assert resp.json()["full_text"] == "real path"
     assert [c.download for c in fake_yt_dlp.calls] == [False, True]
+    assert all(c.opts["allowed_extractors"] == main.YOUTUBE_EXTRACTORS for c in fake_yt_dlp.calls)
 
 
 # TikTok
@@ -184,6 +187,7 @@ def test_tiktok_captions(client, fake_yt_dlp, tiktok_captions, audio):
         "segments": [{"text": "hello", "start": 0.0, "duration": 1.0}],
     }
     assert [c.url for c in fake_yt_dlp.calls] == [TIKTOK_URL]
+    assert fake_yt_dlp.calls[0].opts["allowed_extractors"] == main.TIKTOK_EXTRACTORS
     assert tiktok_captions.calls == [(fake_yt_dlp.info, ["en"])]
     assert audio.calls == []
 
@@ -242,7 +246,7 @@ def test_tiktok_fallback_uses_canonical_webpage_url(client, fake_yt_dlp, tiktok_
 
     assert resp.status_code == 200
     assert resp.json()["source"] == "whisper_transcription"
-    assert audio.calls == [(TIKTOK_URL, "1", ["en"])]
+    assert audio.calls == [(TIKTOK_URL, "1", ["en"], main.TIKTOK_EXTRACTORS)]
 
 
 def test_tiktok_fallback_without_webpage_url_uses_request_url(client, fake_yt_dlp, tiktok_captions, audio):
@@ -254,12 +258,17 @@ def test_tiktok_fallback_without_webpage_url_uses_request_url(client, fake_yt_dl
     assert audio.calls[0][0] == TIKTOK_URL
 
 
-# Known bugs
+def test_tiktok_scheme_less_url_is_looked_up_over_https(client, fake_yt_dlp, tiktok_captions):
+    fake_yt_dlp.info = {"id": "1", "duration": 15}
 
-@pytest.mark.xfail(
-    reason="Known bug (SSRF): an attacker URL containing '//vm.tiktok.com/' is "
-           "accepted and passed verbatim to yt-dlp."
-)
+    resp = client.post("/captions", json={"url": "vm.tiktok.com/ZMabc123/"})
+
+    assert resp.status_code == 200
+    assert [c.url for c in fake_yt_dlp.calls] == ["https://vm.tiktok.com/ZMabc123/"]
+
+
+# SSRF
+
 def test_embedded_tiktok_url_is_rejected_before_lookup(client, fake_yt_dlp, tiktok_captions):
     fake_yt_dlp.info = {"id": "1", "duration": 15}
 
@@ -268,6 +277,8 @@ def test_embedded_tiktok_url_is_rejected_before_lookup(client, fake_yt_dlp, tikt
     assert fake_yt_dlp.calls == []
     assert resp.status_code == 422
 
+
+# Known bugs
 
 @pytest.mark.xfail(
     reason="Known bug: RequestBlocked/IpBlocked from youtube-transcript-api are "
