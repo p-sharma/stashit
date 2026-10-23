@@ -21,7 +21,16 @@ uvicorn main:app --reload --port 8000
 
 Interactive API docs are served at http://localhost:8000/docs.
 
-There are no tests, linter, or formatter set up yet.
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The tests are in `tests/`. They make no network calls: yt-dlp, faster-whisper, `youtube-transcript-api`, and `requests` are all replaced with fakes. Each known bug (see [Known issues](#known-issues)) has a test marked `xfail(strict=True)`. These tests describe the correct behaviour, so a fix makes them pass unexpectedly and turns the run red. When that happens, remove the marker.
+
+There is no linter or formatter set up yet.
 
 ## API
 
@@ -141,3 +150,12 @@ These environment variables are optional overrides:
 - **The API key is not enforced.** The script deploys the service publicly and sets `API_KEY`, but `main.py` never checks it. Until the service has a request-level key check, anyone with the URL can call it.
 - **Running without `API_KEY` rotates the key.** Each run without `API_KEY` set generates and deploys a new key. Pass the existing key to keep it.
 - **The roles apply to the whole project.** The roles in step 5 cover the whole project, not just this service. `storage.objectAdmin` in particular gives the runtime account read and write access to every bucket in the project.
+
+## Known issues
+
+Each of these has a strict `xfail` test that will start failing once the bug is fixed.
+
+- **The TikTok URL check allows SSRF.** The URL patterns in `main.py` match anywhere in the string. A URL like `http://169.254.169.254/x?//vm.tiktok.com/` is treated as TikTok, and the whole URL is passed to yt-dlp, whose generic extractor fetches any host. The service is public and the API key isn't checked, so this matters. YouTube links are not affected, because that branch rebuilds the URL from the video ID.
+- **WebVTT timestamps without hours are read as 0.** `_vtt_timestamp_to_seconds` only handles `hh:mm:ss.mmm`. Cues written as `mm:ss.mmm`, which WebVTT allows, all get `start=0` and `duration=0`.
+- **YouTube request-blocking errors return a 500.** `fetch_youtube_captions` only catches `TranscriptsDisabled`, `NoTranscriptFound`, and `VideoUnavailable`. `RequestBlocked` and `IpBlocked`, which YouTube often raises against cloud IPs, return an unhandled 500.
+- **Long Shorts IDs are cut short.** The Shorts ID pattern has no end boundary, so a 12-character ID is accepted and cut to 11 characters.
