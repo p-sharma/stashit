@@ -1,0 +1,13 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+youtube-transcript-api>=1.0
+pydantic>=2.0
+requests>=2.31
+ 
+# Required for every request: video duration checks (both platforms),
+# TikTok metadata lookup, and the audio-download fallback.
+yt-dlp[default]>=2025.10.22
+ 
+# Only needed for the audio-download fallback when a video has no caption
+# track at all. Comment out if you're okay with 404s in that case instead.
+faster-whisper>=1.0.0
