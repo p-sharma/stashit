@@ -15,7 +15,6 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.math.sqrt
 
 @HiltWorker
 class EmbeddingWorker @AssistedInject constructor(
@@ -36,9 +35,12 @@ class EmbeddingWorker @AssistedInject constructor(
         return withContext(Dispatchers.Default) {
             try {
                 var processed = 0
+                // Skipped items stay pending, so page by id to visit each row once per run.
+                var cursor = 0L
                 while (true) {
-                    val pending = repository.getPendingEmbedding(BATCH_SIZE)
+                    val pending = repository.getPendingEmbedding(cursor, BATCH_SIZE)
                     if (pending.isEmpty()) break
+                    cursor = pending.last().id
 
                     for (item in pending) {
                         val metaData = metadataRouter.fetch(item)
@@ -55,7 +57,6 @@ class EmbeddingWorker @AssistedInject constructor(
                             Log.w("TAG", "NaN embedding null")
                             continue
                         }
-                        val norm = sqrt(embedding.sumOf { (it * it).toDouble() })
                         repository.attachEmbedding(item.id, embedding, tags = emptyList())
                         processed++
                     }

@@ -17,7 +17,7 @@ interface SavedItemRepository {
 
     suspend fun search(query: String, limit: Int = 20):List<SearchResult>
 
-    suspend fun getPendingEmbedding(batchSize: Int): List<SavedItem>
+    suspend fun getPendingEmbedding(afterId: Long = 0, batchSize: Int): List<SavedItem>
     suspend fun attachEmbedding(id: Long, embedding: FloatArray, tags: List<String>)
 
     suspend fun attachMetaData(id: Long, metadata: RemoteMetaData?)

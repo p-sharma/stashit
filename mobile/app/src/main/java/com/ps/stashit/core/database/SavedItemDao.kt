@@ -25,8 +25,8 @@ interface SavedItemDao {
     @Query("SELECT * from saved_items WHERE embedding IS NOT NULL")
     suspend fun getAllEmbedded(): List<SavedItemEntity>
 
-    @Query("SELECT * FROM saved_items where embedding IS NULL LIMIT :batchSize")
-    suspend fun getPendingEmbedding(batchSize: Int = 20): List<SavedItemEntity>
+    @Query("SELECT * FROM saved_items WHERE embedding IS NULL AND id > :afterId ORDER BY id LIMIT :batchSize")
+    suspend fun getPendingEmbedding(afterId: Long = 0, batchSize: Int = 20): List<SavedItemEntity>
 
     @Query("SELECT COUNT(*) FROM saved_items where embedding IS NULL")
     fun observePendingCount(): Flow<Int>

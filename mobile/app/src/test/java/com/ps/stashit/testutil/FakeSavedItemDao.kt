@@ -50,8 +50,8 @@ class FakeSavedItemDao : SavedItemDao {
     override suspend fun getAllEmbedded(): List<SavedItemEntity> =
         rows.value.values.filter { it.embedding != null }
 
-    override suspend fun getPendingEmbedding(batchSize: Int): List<SavedItemEntity> =
-        rows.value.values.filter { it.embedding == null }.take(batchSize)
+    override suspend fun getPendingEmbedding(afterId: Long, batchSize: Int): List<SavedItemEntity> =
+        rows.value.values.filter { it.embedding == null && it.id > afterId }.sortedBy { it.id }.take(batchSize)
 
     override fun observePendingCount(): Flow<Int> =
         version.map { rows.value.values.count { it.embedding == null } }

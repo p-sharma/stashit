@@ -50,12 +50,12 @@ class FakeSavedItemRepository(
         return searchResults(query)
     }
 
-    override suspend fun getPendingEmbedding(batchSize: Int): List<SavedItem> {
+    override suspend fun getPendingEmbedding(afterId: Long, batchSize: Int): List<SavedItem> {
         pendingCalls++
         check(pendingCalls <= maxPendingCalls) {
             "getPendingEmbedding called $pendingCalls times; pending queue never drained"
         }
-        return items.value.filter { !it.isEmbedded }.take(batchSize)
+        return items.value.filter { !it.isEmbedded && it.id > afterId }.sortedBy { it.id }.take(batchSize)
     }
 
     override suspend fun attachEmbedding(id: Long, embedding: FloatArray, tags: List<String>) {

@@ -90,8 +90,8 @@ class SavedItemRepositoryImpl @Inject constructor(
             .toList()
     }
 
-    override suspend fun getPendingEmbedding(batchSize: Int): List<SavedItem> {
-        return dao.getPendingEmbedding(batchSize).map { it.toDomain() }
+    override suspend fun getPendingEmbedding(afterId: Long, batchSize: Int): List<SavedItem> {
+        return dao.getPendingEmbedding(afterId, batchSize).map { it.toDomain() }
     }
 
     override suspend fun attachEmbedding(

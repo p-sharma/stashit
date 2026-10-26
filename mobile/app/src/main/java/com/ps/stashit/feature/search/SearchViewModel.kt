@@ -28,7 +28,7 @@ class SearchViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collectLatest { query ->
                     if(query.isEmpty()) {
-                      setState { copy(results = emptyList(), isSearching = false, hasSearched = true) }
+                      setState { copy(results = emptyList(), isSearching = false, hasSearched = false) }
                       return@collectLatest
                     }
                     setState { copy(isSearching = true) }
