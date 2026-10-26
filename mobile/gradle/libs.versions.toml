@@ -19,6 +19,11 @@ coil = "3.5.0"
 media-pipe-task-text="1.0.0"
 media-pipe-task-genai="0.10.35"
 localagent-rag="0.3.0"
+coroutines = "1.10.2"
+turbine = "1.2.1"
+mockk = "1.14.5"
+robolectric = "4.16"
+androidx-test-core = "1.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -58,6 +63,14 @@ hilt-viewmodel = {group = "androidx.hilt", name = "hilt-lifecycle-viewmodel-comp
 
 #WorkManager
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
+work-testing = { group = "androidx.work", name = "work-testing", version.ref = "workManager" }
+
+#Testing
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
+mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+androidx-test-core = { group = "androidx.test", name = "core-ktx", version.ref = "androidx-test-core" }
 
 #Local RAG framework
 local-agent-rag = { group = "com.google.ai.edge.localagents", name = "localagents-rag", version.ref = "localagent-rag" }
