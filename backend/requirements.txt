@@ -11,3 +11,6 @@ yt-dlp[default]>=2025.10.22
 # Only needed for the audio-download fallback when a video has no caption
 # track at all. Comment out if you're okay with 404s in that case instead.
 faster-whisper>=1.0.0
+# faster-whisper calls av.open(..., metadata_errors=...), which PyAV 19.0.0
+# removed. Without this pin, every audio-fallback request fails with a 500.
+av<19

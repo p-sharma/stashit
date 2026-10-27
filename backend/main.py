@@ -59,7 +59,7 @@ logger = logging.getLogger("caption_service")
 app = FastAPI(title="Short-Form Video Caption Service", version="2.0.0")
 
 # Hard cap on video length this service will process, in seconds.
-MAX_DURATION_SECONDS = 120
+MAX_DURATION_SECONDS = 300
 
 # --------------------------------------------------------------------------
 # Request / response models
