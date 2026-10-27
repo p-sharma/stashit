@@ -3,6 +3,7 @@ package com.ps.stashit.data.repository
 import android.util.Log
 import com.ps.stashit.core.CaptionScheduler
 import com.ps.stashit.core.EmbeddingScheduler
+import com.ps.stashit.core.database.Converters
 import com.ps.stashit.core.database.Platform
 import com.ps.stashit.core.database.SavedItemDao
 import com.ps.stashit.core.database.SavedItemEntity
@@ -26,6 +27,7 @@ class SavedItemRepositoryImpl @Inject constructor(
     companion object {
         private const val MIN_SIMILARITY_THRESHOLD = 0.75f
         private val TRANSCRIPT_PLATFORMS = setOf(Platform.YOUTUBE_SHORTS, Platform.TIKTOK)
+        private val converters = Converters()
     }
 
     override fun observeAll(): Flow<List<SavedItem>> {
@@ -114,7 +116,7 @@ class SavedItemRepositoryImpl @Inject constructor(
     ) {
         dao.attachEmbeddingIfCurrent(
             id = id,
-            embedding = embedding,
+            embedding = converters.fromEmbedding(embedding)!!,
             tags = tags.joinToString(","),
             classifiedAt = System.currentTimeMillis(),
             transcript = embeddedTranscript

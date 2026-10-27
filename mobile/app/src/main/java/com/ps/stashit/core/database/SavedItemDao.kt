@@ -69,6 +69,8 @@ interface SavedItemDao {
     suspend fun updateTranscriptStatus(id: Long, status: TranscriptStatus, fetchedAt: Long)
 
     // The transcript guard drops a write computed before CaptionWorker attached a newer transcript.
+    // embedding is the Converters BLOB: Room expands an array query parameter into one placeholder
+    // per element instead of applying the FloatArray converter.
     @Query(
         """
         UPDATE saved_items
@@ -78,7 +80,7 @@ interface SavedItemDao {
     )
     suspend fun attachEmbeddingIfCurrent(
         id: Long,
-        embedding: FloatArray,
+        embedding: ByteArray,
         tags: String,
         classifiedAt: Long,
         transcript: String?

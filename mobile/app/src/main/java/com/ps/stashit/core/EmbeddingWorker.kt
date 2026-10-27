@@ -13,6 +13,7 @@ import com.ps.stashit.data.domain.SavedItem
 import com.ps.stashit.data.repository.SavedItemRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -25,6 +26,7 @@ class EmbeddingWorker @AssistedInject constructor(
     private val metadataRouter: MetaDataFetcherRouter
 ) : CoroutineWorker(context, params) {
     companion object {
+        private const val TAG = "EmbeddingWorker"
         const val BATCH_SIZE = 20
         const val KEY_PROCESSED_COUNT = "processed_count"
         const val UNIQUE_PERIODIC_NAME = "embedding_sweep"
@@ -54,7 +56,7 @@ class EmbeddingWorker @AssistedInject constructor(
                         if (text.isBlank()) continue
                         val embedding = textEmbedder.embedDocument(text)
                         if(embedding.any { it.isNaN() }) {
-                            Log.w("TAG", "NaN embedding null")
+                            Log.w(TAG, "NaN embedding for item ${item.id}")
                             continue
                         }
                         repository.attachEmbedding(item.id, embedding, tags = emptyList(), embeddedTranscript = item.transcript)
@@ -62,8 +64,10 @@ class EmbeddingWorker @AssistedInject constructor(
                     }
                 }
                 Result.Success(workDataOf(KEY_PROCESSED_COUNT to processed))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.e("TAG", "Exception $e")
+                Log.e(TAG, "Embedding run failed", e)
                 Result.retry()
             }
         }

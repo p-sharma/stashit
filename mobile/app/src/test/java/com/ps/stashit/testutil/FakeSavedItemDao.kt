@@ -1,5 +1,6 @@
 package com.ps.stashit.testutil
 
+import com.ps.stashit.core.database.Converters
 import com.ps.stashit.core.database.SavedItemDao
 import com.ps.stashit.core.database.Platform
 import com.ps.stashit.core.database.SavedItemEntity
@@ -99,14 +100,15 @@ class FakeSavedItemDao : SavedItemDao {
 
     override suspend fun attachEmbeddingIfCurrent(
         id: Long,
-        embedding: FloatArray,
+        embedding: ByteArray,
         tags: String,
         classifiedAt: Long,
         transcript: String?
     ): Int {
         val row = rows.value[id] ?: return 0
         if (row.transcript != transcript) return 0
-        rows.value = rows.value + (id to row.copy(embedding = embedding, tags = tags, classifiedAt = classifiedAt))
+        val vector = Converters().toEmbedding(embedding)
+        rows.value = rows.value + (id to row.copy(embedding = vector, tags = tags, classifiedAt = classifiedAt))
         return 1
     }
 
