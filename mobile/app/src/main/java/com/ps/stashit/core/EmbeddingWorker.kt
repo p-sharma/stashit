@@ -57,7 +57,7 @@ class EmbeddingWorker @AssistedInject constructor(
                             Log.w("TAG", "NaN embedding null")
                             continue
                         }
-                        repository.attachEmbedding(item.id, embedding, tags = emptyList())
+                        repository.attachEmbedding(item.id, embedding, tags = emptyList(), embeddedTranscript = item.transcript)
                         processed++
                     }
                 }
@@ -70,7 +70,7 @@ class EmbeddingWorker @AssistedInject constructor(
     }
 
     private fun buildEmbeddingText(item: SavedItem): String {
-        return listOfNotNull(item.extractedTitle, item.caption).joinToString(" ").trim()
+        return listOfNotNull(item.extractedTitle, item.caption, item.transcript).joinToString(" ").trim()
     }
 
 }

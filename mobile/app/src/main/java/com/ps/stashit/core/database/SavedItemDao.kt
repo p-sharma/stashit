@@ -46,6 +46,44 @@ interface SavedItemDao {
     )
     suspend fun updateMetaData(id: Long, title: String?, thumbnailUrl: String?, fetchedAt: Long)
 
+    @Query(
+        """
+        SELECT * FROM saved_items
+        WHERE transcriptStatus = 'PENDING' AND platform IN ('YOUTUBE_SHORTS', 'TIKTOK') AND id > :afterId
+        ORDER BY id LIMIT :batchSize
+    """
+    )
+    suspend fun getPendingTranscript(afterId: Long = 0, batchSize: Int = 20): List<SavedItemEntity>
+
+    // Clearing the embedding queues the item for re-embedding with the transcript included.
+    @Query(
+        """
+        UPDATE saved_items
+        SET transcript = :transcript, transcriptStatus = 'DONE', transcriptFetchedAt = :fetchedAt, embedding = NULL
+        WHERE id = :id
+    """
+    )
+    suspend fun attachTranscript(id: Long, transcript: String, fetchedAt: Long)
+
+    @Query("UPDATE saved_items SET transcriptStatus = :status, transcriptFetchedAt = :fetchedAt WHERE id = :id")
+    suspend fun updateTranscriptStatus(id: Long, status: TranscriptStatus, fetchedAt: Long)
+
+    // The transcript guard drops a write computed before CaptionWorker attached a newer transcript.
+    @Query(
+        """
+        UPDATE saved_items
+        SET embedding = :embedding, tags = :tags, classifiedAt = :classifiedAt
+        WHERE id = :id AND transcript IS :transcript
+    """
+    )
+    suspend fun attachEmbeddingIfCurrent(
+        id: Long,
+        embedding: FloatArray,
+        tags: String,
+        classifiedAt: Long,
+        transcript: String?
+    ): Int
+
     @Query("UPDATE saved_items SET embedding = NULL, embeddingModelVersion = NULL")
     suspend fun clearAllEmbeddings()
 }

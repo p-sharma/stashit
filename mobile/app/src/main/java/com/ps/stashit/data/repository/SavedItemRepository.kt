@@ -18,7 +18,15 @@ interface SavedItemRepository {
     suspend fun search(query: String, limit: Int = 20):List<SearchResult>
 
     suspend fun getPendingEmbedding(afterId: Long = 0, batchSize: Int): List<SavedItem>
-    suspend fun attachEmbedding(id: Long, embedding: FloatArray, tags: List<String>)
+    /**
+     * Stores the embedding only if the row's transcript still equals [embeddedTranscript],
+     * so a vector computed before a transcript arrived never overwrites the re-embed request.
+     */
+    suspend fun attachEmbedding(id: Long, embedding: FloatArray, tags: List<String>, embeddedTranscript: String?)
 
     suspend fun attachMetaData(id: Long, metadata: RemoteMetaData?)
+
+    suspend fun getPendingTranscript(afterId: Long = 0, batchSize: Int): List<SavedItem>
+    suspend fun attachTranscript(id: Long, transcript: String)
+    suspend fun markTranscriptUnavailable(id: Long)
 }

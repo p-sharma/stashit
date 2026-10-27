@@ -32,9 +32,11 @@ class EmbeddingScheduler @Inject constructor(
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.MILLISECONDS)
             .build()
 
+        // APPEND_OR_REPLACE, not KEEP: CaptionWorker re-queues rows whose ids are behind a running
+        // worker's cursor, so a trigger during a run must schedule a follow-up run.
         workManager.enqueueUniqueWork(
             EmbeddingWorker.UNIQUE_IMMEDIATE_NAME,
-            ExistingWorkPolicy.KEEP,
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
             request
         )
     }

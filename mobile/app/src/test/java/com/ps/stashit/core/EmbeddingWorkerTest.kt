@@ -224,4 +224,34 @@ class EmbeddingWorkerTest {
         assertEquals(1, result.processedCount())
         assertNull(repository.embeddings[1])
     }
+
+    @Test
+    fun `transcript is appended to the embedding text`() = runTest {
+        repository.items.value = listOf(
+            savedItem(id = 1, platform = Platform.INSTAGRAM_REELS, caption = "pasta", transcript = "boil the water")
+        )
+
+        buildWorker().doWork()
+
+        assertEquals(listOf("pasta boil the water"), embedder.embeddedDocuments)
+        assertArrayEquals(unitVector, repository.embeddings[1], 0f)
+    }
+
+    @Test
+    fun `embedding computed before a transcript arrived is not stored`() = runTest {
+        repository.items.value = listOf(savedItem(id = 1, platform = Platform.INSTAGRAM_REELS, caption = "pasta"))
+        // Simulates CaptionWorker attaching a transcript while this item is being embedded.
+        val racingEmbedder = object : TextEmbedder by embedder {
+            override suspend fun embedDocument(text: String): FloatArray {
+                repository.attachTranscript(1, "boil the water")
+                return embedder.embedDocument(text)
+            }
+        }
+
+        val result = buildWorker(racingEmbedder).doWork()
+
+        assertSuccess(result)
+        assertNull(repository.embeddings[1])
+        assertTrue(repository.items.value.single().let { !it.isEmbedded && it.transcript == "boil the water" })
+    }
 }

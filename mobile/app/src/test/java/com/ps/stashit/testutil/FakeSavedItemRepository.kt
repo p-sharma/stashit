@@ -1,6 +1,7 @@
 package com.ps.stashit.testutil
 
 import com.ps.stashit.core.database.Platform
+import com.ps.stashit.core.database.TranscriptStatus
 import com.ps.stashit.core.metadata.RemoteMetaData
 import com.ps.stashit.data.domain.SavedItem
 import com.ps.stashit.data.domain.SearchResult
@@ -25,6 +26,9 @@ class FakeSavedItemRepository(
     val searchQueries = mutableListOf<String>()
     val embeddings = mutableMapOf<Long, FloatArray>()
     val metadata = mutableMapOf<Long, RemoteMetaData?>()
+
+    /** Transcript status per item id; items absent from the map are not pending a transcript. */
+    val transcriptStatuses = mutableMapOf<Long, TranscriptStatus>()
     var pendingCalls = 0
         private set
 
@@ -58,7 +62,14 @@ class FakeSavedItemRepository(
         return items.value.filter { !it.isEmbedded && it.id > afterId }.sortedBy { it.id }.take(batchSize)
     }
 
-    override suspend fun attachEmbedding(id: Long, embedding: FloatArray, tags: List<String>) {
+    override suspend fun attachEmbedding(
+        id: Long,
+        embedding: FloatArray,
+        tags: List<String>,
+        embeddedTranscript: String?
+    ) {
+        val current = items.value.firstOrNull { it.id == id } ?: return
+        if (current.transcript != embeddedTranscript) return
         embeddings[id] = embedding
         items.value = items.value.map { if (it.id == id) it.copy(isEmbedded = true) else it }
     }
@@ -68,5 +79,23 @@ class FakeSavedItemRepository(
         items.value = items.value.map {
             if (it.id == id) it.copy(extractedTitle = metadata?.title, thumbnailUrl = metadata?.thumbnailUrl) else it
         }
+    }
+
+    override suspend fun getPendingTranscript(afterId: Long, batchSize: Int): List<SavedItem> =
+        items.value
+            .filter { transcriptStatuses[it.id] == TranscriptStatus.PENDING && it.id > afterId }
+            .sortedBy { it.id }
+            .take(batchSize)
+
+    override suspend fun attachTranscript(id: Long, transcript: String) {
+        transcriptStatuses[id] = TranscriptStatus.DONE
+        embeddings.remove(id)
+        items.value = items.value.map {
+            if (it.id == id) it.copy(transcript = transcript, isEmbedded = false) else it
+        }
+    }
+
+    override suspend fun markTranscriptUnavailable(id: Long) {
+        transcriptStatuses[id] = TranscriptStatus.UNAVAILABLE
     }
 }

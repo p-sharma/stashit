@@ -1,5 +1,6 @@
 package com.ps.stashit.core.database
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -28,7 +29,13 @@ data class SavedItemEntity(
     val thumbnailUrl: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val classifiedAt: Long? = null,
-    val metadataFetchedAt: Long? = null
+    val metadataFetchedAt: Long? = null,
+
+    //Spoken captions from the caption service, filled in async by CaptionWorker
+    val transcript: String? = null,
+    @ColumnInfo(defaultValue = "PENDING")
+    val transcriptStatus: TranscriptStatus = TranscriptStatus.PENDING,
+    val transcriptFetchedAt: Long? = null
 ) {
 
     override fun hashCode(): Int = id.hashCode()
@@ -43,4 +50,8 @@ data class SavedItemEntity(
 
 enum class Platform {
     YOUTUBE_SHORTS, TIKTOK, INSTAGRAM_REELS, UNKNOWN
+}
+
+enum class TranscriptStatus {
+    PENDING, DONE, UNAVAILABLE, SKIPPED
 }

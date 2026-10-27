@@ -1,10 +1,12 @@
 package com.ps.stashit.data.repository
 
 import android.util.Log
+import com.ps.stashit.core.CaptionScheduler
 import com.ps.stashit.core.EmbeddingScheduler
 import com.ps.stashit.core.database.Platform
 import com.ps.stashit.core.database.SavedItemDao
 import com.ps.stashit.core.database.SavedItemEntity
+import com.ps.stashit.core.database.TranscriptStatus
 import com.ps.stashit.core.metadata.RemoteMetaData
 import com.ps.stashit.core.ml.TextEmbedder
 import com.ps.stashit.data.domain.SavedItem
@@ -18,10 +20,12 @@ import kotlin.math.sqrt
 class SavedItemRepositoryImpl @Inject constructor(
     private val dao: SavedItemDao,
     private val textEmbedder: TextEmbedder,
-    private val embeddingScheduler: EmbeddingScheduler
+    private val embeddingScheduler: EmbeddingScheduler,
+    private val captionScheduler: CaptionScheduler
 ) : SavedItemRepository {
     companion object {
         private const val MIN_SIMILARITY_THRESHOLD = 0.75f
+        private val TRANSCRIPT_PLATFORMS = setOf(Platform.YOUTUBE_SHORTS, Platform.TIKTOK)
     }
 
     override fun observeAll(): Flow<List<SavedItem>> {
@@ -46,9 +50,17 @@ class SavedItemRepositoryImpl @Inject constructor(
             dao.update(updated)
             return existing.id
         }
-        val entity = SavedItemEntity(url = url, platform = platform, caption = caption)
+        val transcriptStatus =
+            if (platform in TRANSCRIPT_PLATFORMS) TranscriptStatus.PENDING else TranscriptStatus.SKIPPED
+        val entity = SavedItemEntity(
+            url = url,
+            platform = platform,
+            caption = caption,
+            transcriptStatus = transcriptStatus
+        )
         val id = dao.insert(entity)
         embeddingScheduler.triggerImmediate()
+        if (transcriptStatus == TranscriptStatus.PENDING) captionScheduler.triggerImmediate()
         return id
     }
 
@@ -73,7 +85,7 @@ class SavedItemRepositoryImpl @Inject constructor(
                 val embedding = entity.embedding ?: return@mapNotNull null
                 val semanticScore = cosineSimilarity(queryEmbedding, embedding)
 
-                val text = listOfNotNull(entity.caption, entity.extractedTitle)
+                val text = listOfNotNull(entity.caption, entity.extractedTitle, entity.transcript)
                     .joinToString(" ")
                     .lowercase()
                 val isExactMatch = text.contains(queryLower)
@@ -97,15 +109,15 @@ class SavedItemRepositoryImpl @Inject constructor(
     override suspend fun attachEmbedding(
         id: Long,
         embedding: FloatArray,
-        tags: List<String>
+        tags: List<String>,
+        embeddedTranscript: String?
     ) {
-        val entity = dao.getById(id) ?: return
-        dao.update(
-            entity.copy(
-                embedding = embedding,
-                tags = tags.joinToString(","),
-                classifiedAt = System.currentTimeMillis()
-            )
+        dao.attachEmbeddingIfCurrent(
+            id = id,
+            embedding = embedding,
+            tags = tags.joinToString(","),
+            classifiedAt = System.currentTimeMillis(),
+            transcript = embeddedTranscript
         )
     }
 
@@ -116,6 +128,18 @@ class SavedItemRepositoryImpl @Inject constructor(
             thumbnailUrl = metadata?.thumbnailUrl,
             fetchedAt = System.currentTimeMillis()
         )
+    }
+
+    override suspend fun getPendingTranscript(afterId: Long, batchSize: Int): List<SavedItem> {
+        return dao.getPendingTranscript(afterId, batchSize).map { it.toDomain() }
+    }
+
+    override suspend fun attachTranscript(id: Long, transcript: String) {
+        dao.attachTranscript(id, transcript, fetchedAt = System.currentTimeMillis())
+    }
+
+    override suspend fun markTranscriptUnavailable(id: Long) {
+        dao.updateTranscriptStatus(id, TranscriptStatus.UNAVAILABLE, fetchedAt = System.currentTimeMillis())
     }
 
     private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {

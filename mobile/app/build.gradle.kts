@@ -1,11 +1,23 @@
 import com.android.tools.r8.internal.im
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.room)
 }
+
+// Release reads the deployed caption service URL from -PcaptionServiceUrl or local.properties,
+// so the Cloud Run URL stays out of source control.
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+val releaseCaptionServiceUrl: String = providers.gradleProperty("captionServiceUrl").orNull
+    ?: localProperties.getProperty("captionServiceUrl")
+    ?: ""
 
 android {
     namespace = "com.ps.stashit"
@@ -24,7 +36,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 10.0.2.2 is the host machine as seen from the Android emulator.
+            buildConfigField("String", "CAPTION_SERVICE_BASE_URL", "\"http://10.0.2.2:8000/\"")
+        }
         release {
+            buildConfigField("String", "CAPTION_SERVICE_BASE_URL", "\"$releaseCaptionServiceUrl\"")
             optimization {
                 enable = false
             }
@@ -48,6 +65,20 @@ android {
 
     androidResources {
         noCompress.addAll(listOf("tflite", "task", "bin"))
+    }
+}
+
+room {
+    schemaDirectory("$projectDir/schemas")
+}
+
+// Only packaging needs the real URL; release unit tests and lint build without it.
+tasks.matching { it.name == "packageRelease" || it.name == "packageReleaseBundle" }.configureEach {
+    val url = releaseCaptionServiceUrl
+    doFirst {
+        require(url.startsWith("https://") && url.endsWith("/")) {
+            "Set captionServiceUrl (https://..., ending in '/') in local.properties or pass -PcaptionServiceUrl"
+        }
     }
 }
 
@@ -95,6 +126,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.room.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

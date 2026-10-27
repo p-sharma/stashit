@@ -1,7 +1,9 @@
 package com.ps.stashit.data.repository
 
+import com.ps.stashit.core.CaptionScheduler
 import com.ps.stashit.core.EmbeddingScheduler
 import com.ps.stashit.core.database.Platform
+import com.ps.stashit.core.database.TranscriptStatus
 import com.ps.stashit.core.metadata.RemoteMetaData
 import com.ps.stashit.testutil.FakeSavedItemDao
 import com.ps.stashit.testutil.StubTextEmbedder
@@ -23,6 +25,7 @@ class SavedItemRepositoryImplTest {
     private lateinit var dao: FakeSavedItemDao
     private lateinit var embedder: StubTextEmbedder
     private lateinit var scheduler: EmbeddingScheduler
+    private lateinit var captionScheduler: CaptionScheduler
     private lateinit var repository: SavedItemRepositoryImpl
 
     private val queryVector = floatArrayOf(1f, 0f, 0f)
@@ -32,16 +35,26 @@ class SavedItemRepositoryImplTest {
         dao = FakeSavedItemDao()
         embedder = StubTextEmbedder(dimension = 3)
         scheduler = mockk(relaxed = true)
-        repository = SavedItemRepositoryImpl(dao, embedder, scheduler)
+        captionScheduler = mockk(relaxed = true)
+        repository = SavedItemRepositoryImpl(dao, embedder, scheduler, captionScheduler)
     }
 
     private suspend fun givenEmbedded(
         id: Long,
         embedding: FloatArray,
         caption: String? = null,
-        title: String? = null
+        title: String? = null,
+        transcript: String? = null
     ) {
-        dao.insert(savedItemEntity(id = id, caption = caption, extractedTitle = title, embedding = embedding))
+        dao.insert(
+            savedItemEntity(
+                id = id,
+                caption = caption,
+                extractedTitle = title,
+                embedding = embedding,
+                transcript = transcript
+            )
+        )
     }
 
     // region search
@@ -111,6 +124,13 @@ class SavedItemRepositoryImplTest {
     }
 
     @Test
+    fun `keyword match also checks the transcript`() = runTest {
+        givenEmbedded(1, floatArrayOf(0f, 1f, 0f), transcript = "first we render the guanciale")
+
+        assertEquals(listOf(1L), repository.search("guanciale").map { it.item.id })
+    }
+
+    @Test
     fun `keyword boost can lift an item above a better semantic match`() = runTest {
         embedder.givenQuery("pasta", queryVector)
         givenEmbedded(1, floatArrayOf(0.9f, 0.43589f, 0f))                         // cos ~0.9, no keyword
@@ -165,6 +185,26 @@ class SavedItemRepositoryImplTest {
     }
 
     @Test
+    fun `saving a YouTube or TikTok url queues a transcript fetch`() = runTest {
+        val youtubeId = repository.saveItem("https://youtube.com/shorts/a", Platform.YOUTUBE_SHORTS, null)
+        val tiktokId = repository.saveItem("https://www.tiktok.com/@a/video/1", Platform.TIKTOK, null)
+
+        assertEquals(TranscriptStatus.PENDING, dao.getById(youtubeId)!!.transcriptStatus)
+        assertEquals(TranscriptStatus.PENDING, dao.getById(tiktokId)!!.transcriptStatus)
+        verify(exactly = 2) { captionScheduler.triggerImmediate() }
+    }
+
+    @Test
+    fun `saving an unsupported platform skips the transcript fetch`() = runTest {
+        val instagramId = repository.saveItem("https://instagram.com/reel/a", Platform.INSTAGRAM_REELS, null)
+        val unknownId = repository.saveItem("https://example.com/a", Platform.UNKNOWN, null)
+
+        assertEquals(TranscriptStatus.SKIPPED, dao.getById(instagramId)!!.transcriptStatus)
+        assertEquals(TranscriptStatus.SKIPPED, dao.getById(unknownId)!!.transcriptStatus)
+        verify(exactly = 0) { captionScheduler.triggerImmediate() }
+    }
+
+    @Test
     fun `saving an existing url returns the existing id without inserting`() = runTest {
         val firstId = repository.saveItem("https://youtu.be/a", Platform.YOUTUBE_SHORTS, null)
 
@@ -208,6 +248,7 @@ class SavedItemRepositoryImplTest {
         repository.saveItem("https://youtu.be/a", Platform.YOUTUBE_SHORTS, null)
 
         verify(exactly = 0) { scheduler.triggerImmediate() }
+        verify(exactly = 0) { captionScheduler.triggerImmediate() }
     }
 
     // endregion
@@ -219,7 +260,7 @@ class SavedItemRepositoryImplTest {
         dao.insert(savedItemEntity(id = 1))
         val vector = floatArrayOf(0.1f, 0.2f, 0.3f)
 
-        repository.attachEmbedding(1, vector, listOf("food", "pasta"))
+        repository.attachEmbedding(1, vector, listOf("food", "pasta"), embeddedTranscript = null)
 
         val row = dao.getById(1)!!
         assertArrayEquals(vector, row.embedding, 0f)
@@ -229,9 +270,56 @@ class SavedItemRepositoryImplTest {
 
     @Test
     fun `attachEmbedding for a missing id is a no-op`() = runTest {
-        repository.attachEmbedding(99, floatArrayOf(1f), emptyList())
+        repository.attachEmbedding(99, floatArrayOf(1f), emptyList(), embeddedTranscript = null)
 
         assertTrue(dao.all.isEmpty())
+    }
+
+    @Test
+    fun `attachEmbedding is dropped when the transcript changed after embedding started`() = runTest {
+        dao.insert(savedItemEntity(id = 1))
+        repository.attachTranscript(1, "spoken words")
+
+        repository.attachEmbedding(1, floatArrayOf(1f), emptyList(), embeddedTranscript = null)
+
+        assertNull(dao.getById(1)!!.embedding)
+    }
+
+    @Test
+    fun `attachTranscript stores the text and clears the embedding for re-embedding`() = runTest {
+        dao.insert(savedItemEntity(id = 1, embedding = floatArrayOf(1f)))
+
+        repository.attachTranscript(1, "spoken words")
+
+        val row = dao.getById(1)!!
+        assertEquals("spoken words", row.transcript)
+        assertEquals(TranscriptStatus.DONE, row.transcriptStatus)
+        assertNotNull(row.transcriptFetchedAt)
+        assertNull(row.embedding)
+    }
+
+    @Test
+    fun `markTranscriptUnavailable keeps the embedding`() = runTest {
+        dao.insert(savedItemEntity(id = 1, embedding = floatArrayOf(1f)))
+
+        repository.markTranscriptUnavailable(1)
+
+        val row = dao.getById(1)!!
+        assertEquals(TranscriptStatus.UNAVAILABLE, row.transcriptStatus)
+        assertNotNull(row.embedding)
+    }
+
+    @Test
+    fun `getPendingTranscript returns only pending YouTube and TikTok rows`() = runTest {
+        dao.insert(savedItemEntity(id = 1, platform = Platform.YOUTUBE_SHORTS))
+        dao.insert(savedItemEntity(id = 2, platform = Platform.TIKTOK))
+        dao.insert(savedItemEntity(id = 3, platform = Platform.INSTAGRAM_REELS))
+        dao.insert(savedItemEntity(id = 4, transcriptStatus = TranscriptStatus.SKIPPED))
+        dao.insert(savedItemEntity(id = 5, transcriptStatus = TranscriptStatus.DONE))
+
+        val pending = repository.getPendingTranscript(afterId = 0, batchSize = 10)
+
+        assertEquals(listOf(1L, 2L), pending.map { it.id })
     }
 
     @Test

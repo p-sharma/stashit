@@ -1,7 +1,9 @@
 package com.ps.stashit.testutil
 
 import com.ps.stashit.core.database.SavedItemDao
+import com.ps.stashit.core.database.Platform
 import com.ps.stashit.core.database.SavedItemEntity
+import com.ps.stashit.core.database.TranscriptStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -68,6 +70,44 @@ class FakeSavedItemDao : SavedItemDao {
             thumbnailUrl = thumbnailUrl,
             metadataFetchedAt = fetchedAt
         ))
+    }
+
+    override suspend fun getPendingTranscript(afterId: Long, batchSize: Int): List<SavedItemEntity> =
+        rows.value.values
+            .filter {
+                it.transcriptStatus == TranscriptStatus.PENDING &&
+                    it.platform in setOf(Platform.YOUTUBE_SHORTS, Platform.TIKTOK) &&
+                    it.id > afterId
+            }
+            .sortedBy { it.id }
+            .take(batchSize)
+
+    override suspend fun attachTranscript(id: Long, transcript: String, fetchedAt: Long) {
+        val row = rows.value[id] ?: return
+        rows.value = rows.value + (id to row.copy(
+            transcript = transcript,
+            transcriptStatus = TranscriptStatus.DONE,
+            transcriptFetchedAt = fetchedAt,
+            embedding = null
+        ))
+    }
+
+    override suspend fun updateTranscriptStatus(id: Long, status: TranscriptStatus, fetchedAt: Long) {
+        val row = rows.value[id] ?: return
+        rows.value = rows.value + (id to row.copy(transcriptStatus = status, transcriptFetchedAt = fetchedAt))
+    }
+
+    override suspend fun attachEmbeddingIfCurrent(
+        id: Long,
+        embedding: FloatArray,
+        tags: String,
+        classifiedAt: Long,
+        transcript: String?
+    ): Int {
+        val row = rows.value[id] ?: return 0
+        if (row.transcript != transcript) return 0
+        rows.value = rows.value + (id to row.copy(embedding = embedding, tags = tags, classifiedAt = classifiedAt))
+        return 1
     }
 
     override suspend fun clearAllEmbeddings() {
