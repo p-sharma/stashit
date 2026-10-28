@@ -8,10 +8,9 @@ class MetaDataFetcherRouter @Inject constructor(
     private val youtube: YoutubeMetaDataFetcher,
     private val tiktok: TiktokMetaDataFetcher
 ) {
-    suspend fun fetch(item: SavedItem): RemoteMetaData? = when (item.platform) {
+    suspend fun fetch(item: SavedItem): MetaDataResult = when (item.platform) {
         Platform.YOUTUBE_SHORTS -> youtube.fetch(item.url)
         Platform.TIKTOK -> tiktok.fetch(item.url)
-        Platform.INSTAGRAM_REELS -> null //TODO
-        Platform.UNKNOWN -> null
+        Platform.INSTAGRAM_REELS, Platform.UNKNOWN -> MetaDataResult.Unavailable
     }
 }

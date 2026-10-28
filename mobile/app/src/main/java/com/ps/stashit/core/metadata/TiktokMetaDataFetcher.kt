@@ -8,15 +8,15 @@ import javax.inject.Inject
 class TiktokMetaDataFetcher @Inject constructor(
     private val api: TiktokOEmbedApi
 ) : MetadataFetcher {
-    override suspend fun fetch(url: String): RemoteMetaData? = try {
+    override suspend fun fetch(url: String): MetaDataResult = try {
         val response = api.getOEmbed(url)
-        RemoteMetaData(response.title, response.thumbnailUrl, response.authorName)
+        MetaDataResult.Found(RemoteMetaData(response.title, response.thumbnailUrl, response.authorName))
     } catch (e: HttpException) {
         Log.w(TAG, "oEmbed request for $url failed with HTTP ${e.code()}")
-        null
+        if (e.isTransient()) MetaDataResult.Failed else MetaDataResult.Unavailable
     } catch (e: IOException) {
         Log.w(TAG, "oEmbed request for $url failed", e)
-        null
+        MetaDataResult.Failed
     }
 
     private companion object {

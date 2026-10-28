@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.ps.stashit.core.database.MAX_EMBEDDING_ATTEMPTS
 import com.ps.stashit.core.metadata.MetaDataFetcherRouter
+import com.ps.stashit.core.metadata.MetaDataResult
 import com.ps.stashit.core.ml.TextEmbedder
 import com.ps.stashit.data.domain.SavedItem
 import com.ps.stashit.data.repository.SavedItemRepository
@@ -68,9 +69,25 @@ class EmbeddingWorker @AssistedInject constructor(
     private suspend fun embedItem(item: SavedItem): Boolean = try {
         // A later attempt reuses the stored title instead of calling oEmbed again.
         val title = if (item.metadataFetchedAt == null) {
-            val metaData = metadataRouter.fetch(item)
-            repository.attachMetaData(item.id, metaData)
-            metaData?.title ?: item.extractedTitle
+            when (val result = metadataRouter.fetch(item)) {
+                is MetaDataResult.Found -> {
+                    repository.attachMetaData(item.id, result.metaData)
+                    result.metaData.title ?: item.extractedTitle
+                }
+                MetaDataResult.Unavailable -> {
+                    repository.attachMetaData(item.id, null)
+                    item.extractedTitle
+                }
+                // Embedding now would drop the item from the pending set and lose the title for good,
+                // so wait for a later run unless this is the item's last attempt.
+                MetaDataResult.Failed -> {
+                    if (item.embeddingAttempts + 1 < MAX_EMBEDDING_ATTEMPTS) {
+                        Log.w(TAG, "Metadata fetch for item ${item.id} failed, deferring embedding")
+                        return false
+                    }
+                    item.extractedTitle
+                }
+            }
         } else {
             item.extractedTitle
         }

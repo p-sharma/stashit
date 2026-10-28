@@ -29,7 +29,7 @@ class EmbeddingScheduler @Inject constructor(
                     .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
                     .build()
             )
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.MILLISECONDS)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
 
         // APPEND_OR_REPLACE, not KEEP: CaptionWorker re-queues rows whose ids are behind a running

@@ -31,6 +31,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import okhttp3.ResponseBody.Companion.toResponseBody
+import retrofit2.HttpException
+import retrofit2.Response
 import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
@@ -41,12 +44,14 @@ class EmbeddingWorkerTest {
     private lateinit var embedder: StubTextEmbedder
 
     private val youtubeTitles = mutableMapOf<String, String>()
+    private val youtubeHttpErrors = mutableMapOf<String, Int>()
     private val youtubeRequests = mutableListOf<String>()
     private val tiktokRequests = mutableListOf<String>()
 
     private val youtubeApi = object : YoutubeOEmbedApi {
         override suspend fun getOEmbed(url: String, format: String): YoutubeOEmbedResponse {
             youtubeRequests += url
+            youtubeHttpErrors[url]?.let { throw HttpException(Response.error<Any>(it, "".toResponseBody())) }
             val title = youtubeTitles[url] ?: throw IOException("oEmbed unavailable")
             return YoutubeOEmbedResponse(title, "https://thumb/$url", "author")
         }
@@ -143,8 +148,54 @@ class EmbeddingWorkerTest {
     }
 
     @Test
-    fun `failed metadata fetch falls back to the caption`() = runTest {
+    fun `transient metadata failure defers embedding to a later run`() = runTest {
         repository.items.value = listOf(savedItem(id = 1, url = "https://youtube.com/shorts/x", caption = "pasta"))
+
+        val result = buildWorker().doWork()
+
+        assertEquals(Result.retry(), result)
+        assertTrue(embedder.embeddedDocuments.isEmpty())
+        assertNull(repository.item(1).metadataFetchedAt)
+        assertEquals(1, repository.item(1).embeddingAttempts)
+    }
+
+    @Test
+    fun `server error counts as a transient metadata failure`() = runTest {
+        val url = "https://youtube.com/shorts/x"
+        youtubeHttpErrors[url] = 503
+        repository.items.value = listOf(savedItem(id = 1, url = url, caption = "pasta"))
+
+        val result = buildWorker().doWork()
+
+        assertEquals(Result.retry(), result)
+        assertTrue(embedder.embeddedDocuments.isEmpty())
+        assertNull(repository.item(1).metadataFetchedAt)
+    }
+
+    @Test
+    fun `transient metadata failure on the last attempt embeds the caption without stamping metadata`() = runTest {
+        repository.items.value = listOf(
+            savedItem(
+                id = 1,
+                url = "https://youtube.com/shorts/x",
+                caption = "pasta",
+                embeddingAttempts = MAX_EMBEDDING_ATTEMPTS - 1
+            )
+        )
+
+        val result = buildWorker().doWork()
+
+        assertSuccess(result)
+        assertEquals(listOf("pasta"), embedder.embeddedDocuments)
+        assertNull(repository.item(1).metadataFetchedAt)
+        assertTrue(repository.metadata.isEmpty())
+    }
+
+    @Test
+    fun `unavailable metadata is stamped and the caption is embedded`() = runTest {
+        val url = "https://youtube.com/shorts/private"
+        youtubeHttpErrors[url] = 404
+        repository.items.value = listOf(savedItem(id = 1, url = url, caption = "pasta"))
 
         val result = buildWorker().doWork()
 
