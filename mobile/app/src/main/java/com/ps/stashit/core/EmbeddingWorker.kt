@@ -54,7 +54,7 @@ class EmbeddingWorker @AssistedInject constructor(
                         }
                     }
                 }
-                if (retryNeeded) Result.retry() else Result.Success(workDataOf(KEY_PROCESSED_COUNT to processed))
+                if (retryNeeded) Result.retry() else Result.success(workDataOf(KEY_PROCESSED_COUNT to processed))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
