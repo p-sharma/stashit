@@ -1,5 +1,6 @@
 package com.ps.stashit.testutil
 
+import com.ps.stashit.core.database.MAX_EMBEDDING_ATTEMPTS
 import com.ps.stashit.core.database.Platform
 import com.ps.stashit.core.database.TranscriptStatus
 import com.ps.stashit.core.metadata.RemoteMetaData
@@ -59,7 +60,10 @@ class FakeSavedItemRepository(
         check(pendingCalls <= maxPendingCalls) {
             "getPendingEmbedding called $pendingCalls times; pending queue never drained"
         }
-        return items.value.filter { !it.isEmbedded && it.id > afterId }.sortedBy { it.id }.take(batchSize)
+        return items.value
+            .filter { !it.isEmbedded && it.embeddingAttempts < MAX_EMBEDDING_ATTEMPTS && it.id > afterId }
+            .sortedBy { it.id }
+            .take(batchSize)
     }
 
     override suspend fun attachEmbedding(
@@ -74,10 +78,18 @@ class FakeSavedItemRepository(
         items.value = items.value.map { if (it.id == id) it.copy(isEmbedded = true) else it }
     }
 
+    override suspend fun recordEmbeddingFailure(id: Long) {
+        items.value = items.value.map { if (it.id == id) it.copy(embeddingAttempts = it.embeddingAttempts + 1) else it }
+    }
+
     override suspend fun attachMetaData(id: Long, metadata: RemoteMetaData?) {
         this.metadata[id] = metadata
         items.value = items.value.map {
-            if (it.id == id) it.copy(extractedTitle = metadata?.title, thumbnailUrl = metadata?.thumbnailUrl) else it
+            if (it.id == id) {
+                it.copy(extractedTitle = metadata?.title, thumbnailUrl = metadata?.thumbnailUrl, metadataFetchedAt = 1L)
+            } else {
+                it
+            }
         }
     }
 
@@ -91,7 +103,7 @@ class FakeSavedItemRepository(
         transcriptStatuses[id] = TranscriptStatus.DONE
         embeddings.remove(id)
         items.value = items.value.map {
-            if (it.id == id) it.copy(transcript = transcript, isEmbedded = false) else it
+            if (it.id == id) it.copy(transcript = transcript, isEmbedded = false, embeddingAttempts = 0) else it
         }
     }
 

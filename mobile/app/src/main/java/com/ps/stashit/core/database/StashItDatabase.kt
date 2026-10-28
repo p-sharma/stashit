@@ -6,7 +6,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [SavedItemEntity::class], version = 3, exportSchema = true)
+@Database(entities = [SavedItemEntity::class], version = 4, exportSchema = true)
 @TypeConverters(Converters::class)
 abstract class StashItDatabase : RoomDatabase() {
     abstract fun saveItemDao(): SavedItemDao
@@ -19,6 +19,12 @@ abstract class StashItDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE saved_items ADD COLUMN transcriptStatus TEXT NOT NULL DEFAULT 'PENDING'")
                 db.execSQL("ALTER TABLE saved_items ADD COLUMN transcriptFetchedAt INTEGER")
                 db.execSQL("UPDATE saved_items SET transcriptStatus = 'SKIPPED'")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE saved_items ADD COLUMN embeddingAttempts INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

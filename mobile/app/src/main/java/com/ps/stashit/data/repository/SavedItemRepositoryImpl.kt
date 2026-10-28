@@ -123,6 +123,10 @@ class SavedItemRepositoryImpl @Inject constructor(
         )
     }
 
+    override suspend fun recordEmbeddingFailure(id: Long) {
+        dao.incrementEmbeddingAttempts(id)
+    }
+
     override suspend fun attachMetaData(id: Long, metadata: RemoteMetaData?) {
         dao.updateMetaData(
             id = id,

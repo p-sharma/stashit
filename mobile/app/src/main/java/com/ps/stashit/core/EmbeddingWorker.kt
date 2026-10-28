@@ -6,8 +6,8 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.ps.stashit.core.database.MAX_EMBEDDING_ATTEMPTS
 import com.ps.stashit.core.metadata.MetaDataFetcherRouter
-import com.ps.stashit.core.metadata.MetadataFetcher
 import com.ps.stashit.core.ml.TextEmbedder
 import com.ps.stashit.data.domain.SavedItem
 import com.ps.stashit.data.repository.SavedItemRepository
@@ -37,7 +37,8 @@ class EmbeddingWorker @AssistedInject constructor(
         return withContext(Dispatchers.Default) {
             try {
                 var processed = 0
-                // Skipped items stay pending, so page by id to visit each row once per run.
+                var retryNeeded = false
+                // Failed items stay pending, so page by id to visit each row once per run.
                 var cursor = 0L
                 while (true) {
                     val pending = repository.getPendingEmbedding(cursor, BATCH_SIZE)
@@ -45,25 +46,15 @@ class EmbeddingWorker @AssistedInject constructor(
                     cursor = pending.last().id
 
                     for (item in pending) {
-                        val metaData = metadataRouter.fetch(item)
-                        repository.attachMetaData(item.id,metaData)
-                        val enrichedItem = item.copy(
-                            extractedTitle = metaData?.title?: item.extractedTitle,
-                            caption = item.caption
-                        )
-
-                        val text = buildEmbeddingText(enrichedItem)
-                        if (text.isBlank()) continue
-                        val embedding = textEmbedder.embedDocument(text)
-                        if(embedding.any { it.isNaN() }) {
-                            Log.w(TAG, "NaN embedding for item ${item.id}")
-                            continue
+                        if (embedItem(item)) {
+                            processed++
+                        } else {
+                            repository.recordEmbeddingFailure(item.id)
+                            if (item.embeddingAttempts + 1 < MAX_EMBEDDING_ATTEMPTS) retryNeeded = true
                         }
-                        repository.attachEmbedding(item.id, embedding, tags = emptyList(), embeddedTranscript = item.transcript)
-                        processed++
                     }
                 }
-                Result.Success(workDataOf(KEY_PROCESSED_COUNT to processed))
+                if (retryNeeded) Result.retry() else Result.Success(workDataOf(KEY_PROCESSED_COUNT to processed))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -71,6 +62,38 @@ class EmbeddingWorker @AssistedInject constructor(
                 Result.retry()
             }
         }
+    }
+
+    /** Returns false when this run could not embed the item, which counts as one of its attempts. */
+    private suspend fun embedItem(item: SavedItem): Boolean = try {
+        // A later attempt reuses the stored title instead of calling oEmbed again.
+        val title = if (item.metadataFetchedAt == null) {
+            val metaData = metadataRouter.fetch(item)
+            repository.attachMetaData(item.id, metaData)
+            metaData?.title ?: item.extractedTitle
+        } else {
+            item.extractedTitle
+        }
+
+        val text = buildEmbeddingText(item.copy(extractedTitle = title))
+        if (text.isBlank()) {
+            Log.w(TAG, "No text to embed for item ${item.id}")
+            false
+        } else {
+            val embedding = textEmbedder.embedDocument(text)
+            if (embedding.any { it.isNaN() }) {
+                Log.w(TAG, "NaN embedding for item ${item.id}")
+                false
+            } else {
+                repository.attachEmbedding(item.id, embedding, tags = emptyList(), embeddedTranscript = item.transcript)
+                true
+            }
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.e(TAG, "Embedding item ${item.id} failed", e)
+        false
     }
 
     private fun buildEmbeddingText(item: SavedItem): String {

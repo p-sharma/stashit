@@ -24,6 +24,9 @@ interface SavedItemRepository {
      */
     suspend fun attachEmbedding(id: Long, embedding: FloatArray, tags: List<String>, embeddedTranscript: String?)
 
+    /** Counts a failed embedding run; the item stops being pending after MAX_EMBEDDING_ATTEMPTS. */
+    suspend fun recordEmbeddingFailure(id: Long)
+
     suspend fun attachMetaData(id: Long, metadata: RemoteMetaData?)
 
     suspend fun getPendingTranscript(afterId: Long = 0, batchSize: Int): List<SavedItem>

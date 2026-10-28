@@ -1,6 +1,7 @@
 package com.ps.stashit.testutil
 
 import com.ps.stashit.core.database.Converters
+import com.ps.stashit.core.database.MAX_EMBEDDING_ATTEMPTS
 import com.ps.stashit.core.database.SavedItemDao
 import com.ps.stashit.core.database.Platform
 import com.ps.stashit.core.database.SavedItemEntity
@@ -54,10 +55,18 @@ class FakeSavedItemDao : SavedItemDao {
         rows.value.values.filter { it.embedding != null }
 
     override suspend fun getPendingEmbedding(afterId: Long, batchSize: Int): List<SavedItemEntity> =
-        rows.value.values.filter { it.embedding == null && it.id > afterId }.sortedBy { it.id }.take(batchSize)
+        rows.value.values.filter { it.isPendingEmbedding() && it.id > afterId }.sortedBy { it.id }.take(batchSize)
 
     override fun observePendingCount(): Flow<Int> =
-        version.map { rows.value.values.count { it.embedding == null } }
+        version.map { rows.value.values.count { it.isPendingEmbedding() } }
+
+    override suspend fun incrementEmbeddingAttempts(id: Long) {
+        val row = rows.value[id] ?: return
+        rows.value = rows.value + (id to row.copy(embeddingAttempts = row.embeddingAttempts + 1))
+    }
+
+    private fun SavedItemEntity.isPendingEmbedding() =
+        embedding == null && embeddingAttempts < MAX_EMBEDDING_ATTEMPTS
 
     override suspend fun getById(id: Long): SavedItemEntity? = rows.value[id]
 
@@ -89,7 +98,8 @@ class FakeSavedItemDao : SavedItemDao {
             transcript = transcript,
             transcriptStatus = TranscriptStatus.DONE,
             transcriptFetchedAt = fetchedAt,
-            embedding = null
+            embedding = null,
+            embeddingAttempts = 0
         ))
     }
 
@@ -113,6 +123,6 @@ class FakeSavedItemDao : SavedItemDao {
     }
 
     override suspend fun clearAllEmbeddings() {
-        rows.value = rows.value.mapValues { (_, row) -> row.copy(embedding = null, embeddingModelVersion = null) }
+        rows.value = rows.value.mapValues { (_, row) -> row.copy(embedding = null, embeddingModelVersion = null, embeddingAttempts = 0) }
     }
 }

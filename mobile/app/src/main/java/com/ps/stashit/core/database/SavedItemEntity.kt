@@ -5,6 +5,8 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+const val MAX_EMBEDDING_ATTEMPTS = 3
+
 @Entity(
     tableName = "saved_items",
     indices = [Index(value = ["url"], unique = true)]
@@ -35,7 +37,11 @@ data class SavedItemEntity(
     val transcript: String? = null,
     @ColumnInfo(defaultValue = "PENDING")
     val transcriptStatus: TranscriptStatus = TranscriptStatus.PENDING,
-    val transcriptFetchedAt: Long? = null
+    val transcriptFetchedAt: Long? = null,
+
+    // EmbeddingWorker runs that failed to embed this row; it stops being pending at MAX_EMBEDDING_ATTEMPTS.
+    @ColumnInfo(defaultValue = "0")
+    val embeddingAttempts: Int = 0
 ) {
 
     override fun hashCode(): Int = id.hashCode()

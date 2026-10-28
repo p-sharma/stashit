@@ -8,6 +8,7 @@ import androidx.work.ListenableWorker.Result
 import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
+import com.ps.stashit.core.database.MAX_EMBEDDING_ATTEMPTS
 import com.ps.stashit.core.database.Platform
 import com.ps.stashit.core.metadata.MetaDataFetcherRouter
 import com.ps.stashit.core.metadata.TiktokMetaDataFetcher
@@ -83,6 +84,8 @@ class EmbeddingWorkerTest {
 
     private fun Result.processedCount(): Int =
         outputData.getInt(EmbeddingWorker.KEY_PROCESSED_COUNT, -1)
+
+    private fun FakeSavedItemRepository.item(id: Long) = items.value.single { it.id == id }
 
     private fun assertSuccess(result: Result) {
         assertTrue("expected Result.Success but was $result", result is Result.Success)
@@ -190,14 +193,8 @@ class EmbeddingWorkerTest {
         assertTrue(repository.embeddings.isEmpty())
     }
 
-    /**
-     * BUG: an item whose text is blank is skipped with `continue` and keeps embedding = NULL.
-     * getPendingEmbedding returns it again on every pass, so `pending` is never empty and the
-     * while(true) loop never exits (re-fetching metadata each pass). In production this spins
-     * forever; here the fake repository's call cap turns it into a Retry.
-     */
     @Test
-    fun `item with no text does not stall the worker`() = runTest {
+    fun `item with no text counts as a failed attempt without stalling the worker`() = runTest {
         repository.items.value = listOf(
             savedItem(id = 1, platform = Platform.INSTAGRAM_REELS, caption = null),
             savedItem(id = 2, platform = Platform.INSTAGRAM_REELS, caption = "valid")
@@ -205,13 +202,13 @@ class EmbeddingWorkerTest {
 
         val result = buildWorker().doWork()
 
-        assertSuccess(result)
-        assertEquals(1, result.processedCount())
+        assertEquals(Result.retry(), result)
+        assertEquals(1, repository.item(1).embeddingAttempts)
+        assertArrayEquals(unitVector, repository.embeddings[2], 0f)
     }
 
-    /** BUG: same loop as above, triggered by a NaN embedding instead of blank text. */
     @Test
-    fun `NaN embedding does not stall the worker`() = runTest {
+    fun `NaN embedding counts as a failed attempt without stalling the worker`() = runTest {
         embedder.givenDocument("broken", floatArrayOf(Float.NaN, 0f, 0f))
         repository.items.value = listOf(
             savedItem(id = 1, platform = Platform.INSTAGRAM_REELS, caption = "broken"),
@@ -220,9 +217,88 @@ class EmbeddingWorkerTest {
 
         val result = buildWorker().doWork()
 
-        assertSuccess(result)
-        assertEquals(1, result.processedCount())
+        assertEquals(Result.retry(), result)
         assertNull(repository.embeddings[1])
+        assertEquals(1, repository.item(1).embeddingAttempts)
+        assertArrayEquals(unitVector, repository.embeddings[2], 0f)
+    }
+
+    @Test
+    fun `failing item does not block metadata and embeddings for later items`() = runTest {
+        val url = "https://youtube.com/shorts/b"
+        youtubeTitles[url] = "Second"
+        repository.items.value = listOf(
+            savedItem(id = 1, platform = Platform.INSTAGRAM_REELS, caption = "boom"),
+            savedItem(id = 2, url = url, caption = "later")
+        )
+        val failingEmbedder = object : TextEmbedder by embedder {
+            override suspend fun embedDocument(text: String): FloatArray =
+                if (text == "boom") throw IllegalStateException("write failed") else embedder.embedDocument(text)
+        }
+
+        val result = buildWorker(failingEmbedder).doWork()
+
+        assertEquals(Result.retry(), result)
+        assertEquals(1, repository.item(1).embeddingAttempts)
+        assertEquals("Second", repository.metadata[2]?.title)
+        assertArrayEquals(unitVector, repository.embeddings[2], 0f)
+    }
+
+    @Test
+    fun `item that fails its last attempt is given up and the run succeeds`() = runTest {
+        repository.items.value = listOf(
+            savedItem(
+                id = 1,
+                platform = Platform.INSTAGRAM_REELS,
+                caption = null,
+                embeddingAttempts = MAX_EMBEDDING_ATTEMPTS - 1
+            )
+        )
+
+        val result = buildWorker().doWork()
+
+        assertSuccess(result)
+        assertEquals(MAX_EMBEDDING_ATTEMPTS, repository.item(1).embeddingAttempts)
+        assertTrue(repository.getPendingEmbedding(0, EmbeddingWorker.BATCH_SIZE).isEmpty())
+    }
+
+    @Test
+    fun `items that used up their attempts are not processed`() = runTest {
+        repository.items.value = listOf(
+            savedItem(
+                id = 1,
+                platform = Platform.INSTAGRAM_REELS,
+                caption = "given up",
+                embeddingAttempts = MAX_EMBEDDING_ATTEMPTS
+            )
+        )
+
+        val result = buildWorker().doWork()
+
+        assertSuccess(result)
+        assertEquals(0, result.processedCount())
+        assertTrue(embedder.embeddedDocuments.isEmpty())
+    }
+
+    @Test
+    fun `later attempt reuses stored metadata instead of calling oEmbed`() = runTest {
+        val url = "https://youtube.com/shorts/c"
+        repository.items.value = listOf(
+            savedItem(
+                id = 1,
+                url = url,
+                caption = "retry",
+                extractedTitle = "Stored title",
+                metadataFetchedAt = 1000L,
+                embeddingAttempts = 1
+            )
+        )
+
+        val result = buildWorker().doWork()
+
+        assertSuccess(result)
+        assertTrue(youtubeRequests.isEmpty())
+        assertEquals(listOf("Stored title retry"), embedder.embeddedDocuments)
     }
 
     @Test

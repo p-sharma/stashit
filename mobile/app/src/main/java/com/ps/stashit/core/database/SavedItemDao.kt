@@ -25,11 +25,20 @@ interface SavedItemDao {
     @Query("SELECT * from saved_items WHERE embedding IS NOT NULL")
     suspend fun getAllEmbedded(): List<SavedItemEntity>
 
-    @Query("SELECT * FROM saved_items WHERE embedding IS NULL AND id > :afterId ORDER BY id LIMIT :batchSize")
+    @Query(
+        """
+        SELECT * FROM saved_items
+        WHERE embedding IS NULL AND embeddingAttempts < $MAX_EMBEDDING_ATTEMPTS AND id > :afterId
+        ORDER BY id LIMIT :batchSize
+    """
+    )
     suspend fun getPendingEmbedding(afterId: Long = 0, batchSize: Int = 20): List<SavedItemEntity>
 
-    @Query("SELECT COUNT(*) FROM saved_items where embedding IS NULL")
+    @Query("SELECT COUNT(*) FROM saved_items where embedding IS NULL AND embeddingAttempts < $MAX_EMBEDDING_ATTEMPTS")
     fun observePendingCount(): Flow<Int>
+
+    @Query("UPDATE saved_items SET embeddingAttempts = embeddingAttempts + 1 WHERE id = :id")
+    suspend fun incrementEmbeddingAttempts(id: Long)
 
     @Query("SELECT * FROM saved_items WHERE id = :id")
     suspend fun getById(id: Long): SavedItemEntity?
@@ -55,11 +64,13 @@ interface SavedItemDao {
     )
     suspend fun getPendingTranscript(afterId: Long = 0, batchSize: Int = 20): List<SavedItemEntity>
 
-    // Clearing the embedding queues the item for re-embedding with the transcript included.
+    // Clearing the embedding queues the item for re-embedding with the transcript included,
+    // and the new text gets a fresh set of embedding attempts.
     @Query(
         """
         UPDATE saved_items
-        SET transcript = :transcript, transcriptStatus = 'DONE', transcriptFetchedAt = :fetchedAt, embedding = NULL
+        SET transcript = :transcript, transcriptStatus = 'DONE', transcriptFetchedAt = :fetchedAt,
+            embedding = NULL, embeddingAttempts = 0
         WHERE id = :id
     """
     )
@@ -86,6 +97,6 @@ interface SavedItemDao {
         transcript: String?
     ): Int
 
-    @Query("UPDATE saved_items SET embedding = NULL, embeddingModelVersion = NULL")
+    @Query("UPDATE saved_items SET embedding = NULL, embeddingModelVersion = NULL, embeddingAttempts = 0")
     suspend fun clearAllEmbeddings()
 }

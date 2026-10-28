@@ -23,7 +23,7 @@ object DatabaseModule {
             StashItDatabase::class.java,
             "stashit.db"
         )
-            .addMigrations(StashItDatabase.MIGRATION_2_3)
+            .addMigrations(StashItDatabase.MIGRATION_2_3, StashItDatabase.MIGRATION_3_4)
             .fallbackToDestructiveMigration(true)
             .build()
     }

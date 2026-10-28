@@ -46,6 +46,29 @@ class StashItDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate3To4_keepsRowsWithZeroEmbeddingAttempts() {
+        helper.createDatabase(dbName, 3).use { db ->
+            db.execSQL(
+                """
+                INSERT INTO saved_items (id, url, platform, caption, createdAt, transcriptStatus)
+                VALUES (1, 'https://youtube.com/shorts/a', 'YOUTUBE_SHORTS', 'pasta', 1000, 'DONE')
+                """
+            )
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 4, true, StashItDatabase.MIGRATION_3_4)
+
+        db.query("SELECT url, caption, transcriptStatus, embeddingAttempts FROM saved_items").use { cursor ->
+            assertEquals(1, cursor.count)
+            cursor.moveToFirst()
+            assertEquals("https://youtube.com/shorts/a", cursor.getString(0))
+            assertEquals("pasta", cursor.getString(1))
+            assertEquals("DONE", cursor.getString(2))
+            assertEquals(0, cursor.getInt(3))
+        }
+    }
+
+    @Test
     fun migrate2To3_newRowsDefaultToPending() {
         helper.createDatabase(dbName, 2).close()
 

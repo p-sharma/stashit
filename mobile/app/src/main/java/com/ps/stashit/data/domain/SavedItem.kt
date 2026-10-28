@@ -13,7 +13,9 @@ data class SavedItem(
     val tags: List<String>,
     val thumbnailUrl: String?,
     val  createdAt: Long,
-    val isEmbedded: Boolean
+    val isEmbedded: Boolean,
+    val metadataFetchedAt: Long? = null,
+    val embeddingAttempts: Int = 0
 )
 
 data class SearchResult(
@@ -31,5 +33,7 @@ fun SavedItemEntity.toDomain(): SavedItem = SavedItem(
     tags = tags?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?: emptyList(),
     thumbnailUrl = thumbnailUrl,
     createdAt = createdAt,
-    isEmbedded = embedding != null
+    isEmbedded = embedding != null,
+    metadataFetchedAt = metadataFetchedAt,
+    embeddingAttempts = embeddingAttempts
 )

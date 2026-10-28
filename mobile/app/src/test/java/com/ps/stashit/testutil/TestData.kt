@@ -13,7 +13,9 @@ fun savedItem(
     transcript: String? = null,
     extractedTitle: String? = null,
     tags: List<String> = emptyList(),
-    isEmbedded: Boolean = false
+    isEmbedded: Boolean = false,
+    metadataFetchedAt: Long? = null,
+    embeddingAttempts: Int = 0
 ) = SavedItem(
     id = id,
     url = url,
@@ -24,7 +26,9 @@ fun savedItem(
     tags = tags,
     thumbnailUrl = null,
     createdAt = 0L,
-    isEmbedded = isEmbedded
+    isEmbedded = isEmbedded,
+    metadataFetchedAt = metadataFetchedAt,
+    embeddingAttempts = embeddingAttempts
 )
 
 fun savedItemEntity(

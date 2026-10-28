@@ -102,6 +102,8 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+    // room-testing's schema reader needs 1.8.x; lifecycle alone resolves 1.7.3, and AGP pins the test APK to the app's version.
+    implementation(libs.kotlinx.serialization.core)
 
     implementation(libs.hilt.android)
     implementation(libs.androidx.hilt.work)

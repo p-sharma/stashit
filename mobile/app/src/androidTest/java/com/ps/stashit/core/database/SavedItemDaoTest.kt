@@ -3,11 +3,13 @@ package com.ps.stashit.core.database
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -66,5 +68,39 @@ class SavedItemDaoTest {
 
         assertEquals(0, updated)
         assertNull(dao.getById(id)!!.embedding)
+    }
+
+    @Test
+    fun getPendingEmbedding_excludesRowsThatUsedUpTheirAttempts() = runBlocking {
+        val id = dao.insert(SavedItemEntity(url = "https://youtube.com/shorts/c", platform = Platform.YOUTUBE_SHORTS))
+        repeat(MAX_EMBEDDING_ATTEMPTS - 1) { dao.incrementEmbeddingAttempts(id) }
+        assertEquals(listOf(id), dao.getPendingEmbedding().map { it.id })
+        assertEquals(1, dao.observePendingCount().first())
+
+        dao.incrementEmbeddingAttempts(id)
+
+        assertTrue(dao.getPendingEmbedding().isEmpty())
+        assertEquals(0, dao.observePendingCount().first())
+    }
+
+    @Test
+    fun attachTranscript_resetsEmbeddingAttempts() = runBlocking {
+        val id = dao.insert(SavedItemEntity(url = "https://youtube.com/shorts/d", platform = Platform.YOUTUBE_SHORTS))
+        repeat(MAX_EMBEDDING_ATTEMPTS) { dao.incrementEmbeddingAttempts(id) }
+
+        dao.attachTranscript(id, transcript = "now has text", fetchedAt = 2000)
+
+        assertEquals(0, dao.getById(id)!!.embeddingAttempts)
+        assertEquals(listOf(id), dao.getPendingEmbedding().map { it.id })
+    }
+
+    @Test
+    fun clearAllEmbeddings_resetsEmbeddingAttempts() = runBlocking {
+        val id = dao.insert(SavedItemEntity(url = "https://youtube.com/shorts/e", platform = Platform.YOUTUBE_SHORTS))
+        repeat(MAX_EMBEDDING_ATTEMPTS) { dao.incrementEmbeddingAttempts(id) }
+
+        dao.clearAllEmbeddings()
+
+        assertEquals(0, dao.getById(id)!!.embeddingAttempts)
     }
 }
