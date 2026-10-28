@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in the app or backend does not work as expected.
+labels: [needs-triage]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Mobile app
+        - Backend
+        - CI
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Share a YouTube Short to Stash It
+        2. Share the same Short again from the YouTube app
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: App commit or version, device or emulator, Android version.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant logcat or backend output.
+      render: text
